@@ -1,3 +1,4 @@
+// --- 全局变量 ---
 let mic;
 let vol = 0;
 let dogFrames = {
@@ -7,20 +8,32 @@ let dogFrames = {
   long: []
 };
 
-let dogs = [];
-let blowStartTime = null;
-let lastTriggerTime = 0;
-const blowCooldown = 800; // 最小间隔（防止狗太多）
+let dogs = []; // 保存所有在场上的狗
 
+// --- 状态控制变量 (这是解决问题的核心) ---
+let isBlowing = false;      // 标记当前是否正在吹气
+let blowStartTime = 0;    // 记录每次吹气开始的时间
+
+// --- 可调节参数 ---
+const BLOW_THRESHOLD = 0.05; // 吹气音量的判定阈值，可以根据你的麦克风灵敏度调整
+const SHORT_BREATH_DURATION = 400;  // 时长短于400毫秒，算“短”
+const MID_BREATH_DURATION = 800;    // 时长在400-800毫秒，算“中”
+const MIDDLE_BREATH_DURATION = 1500; // 时长在800-1500毫秒，算“中长”
+// 时长超过1500毫秒，算“长”
+
+// 预加载狗狗帧图
 function preload() {
-  loadDogFrames("short");
-  loadDogFrames("mid");
-  loadDogFrames("middle");
-  loadDogFrames("long");
+  // 为了方便测试，我们只加载 short 和 long 两种
+  // 你可以取消注释来加载全部四种
+  loadDogFrames("short", 2);
+  // loadDogFrames("mid", 2);
+  // loadDogFrames("middle", 2);
+  loadDogFrames("long", 2);
 }
 
-function loadDogFrames(type) {
-  for (let i = 1; i <= 2; i++) {
+// 统一的加载函数
+function loadDogFrames(type, frameCount) {
+  for (let i = 1; i <= frameCount; i++) {
     let filename = `${type}-${String(i).padStart(2, '0')}.png`;
     dogFrames[type].push(loadImage(filename));
   }
@@ -36,58 +49,87 @@ function setup() {
 function draw() {
   background(255);
   vol = mic.getLevel();
-
   let now = millis();
 
-  // 检测吹气开始时间
-  if (vol > 0.06) {
-    if (blowStartTime === null) {
-      blowStartTime = now;
+  // --- 核心逻辑：检测单次吹气的开始和结束 ---
+  // 这是对你之前代码最重要的修改，它解决了“不管怎么吹都只出现最短的狗”的问题
+
+  // 1. 检测到开始吹气
+  if (vol > BLOW_THRESHOLD && !isBlowing) {
+    isBlowing = true;
+    blowStartTime = now;
+  } 
+  // 2. 检测到停止吹气
+  else if (vol < BLOW_THRESHOLD && isBlowing) {
+    isBlowing = false;
+    let blowDuration = now - blowStartTime; // 计算吹气持续了多久
+
+    // 根据吹气时长，决定要生成的狗的类型
+    let dogType;
+    if (blowDuration < SHORT_BREATH_DURATION) {
+      dogType = "short";
+    } else if (blowDuration < MID_BREATH_DURATION) {
+      dogType = "mid";
+    } else if (blowDuration < MIDDLE_BREATH_DURATION) {
+      dogType = "middle";
+    } else {
+      dogType = "long";
+    }
+
+    // 创建一只新狗并添加到数组中
+    // 确保我们加载过这种类型的图片
+    if (dogFrames[dogType] && dogFrames[dogType].length > 0) {
+        dogs.push(new Dog(dogType));
     }
   }
 
-  // 检测吹气结束 -> 添加狗狗
-  if (vol < 0.04 && blowStartTime !== null && now - lastTriggerTime > blowCooldown) {
-    let duration = now - blowStartTime;
-    let dogType = chooseDogType(duration);
-    dogs.push(new Dog(dogType));
-    lastTriggerTime = now;
-    blowStartTime = null;
-  }
-
-  // 更新 & 显示所有狗狗
+  // 更新并显示所有狗
   for (let i = dogs.length - 1; i >= 0; i--) {
     dogs[i].update();
     dogs[i].display();
-    if (dogs[i].x < -200) {
+
+    // 如果狗走出画面，就将它从数组中移除，以节省内存
+    if (dogs[i].x > width + 200) {
       dogs.splice(i, 1);
     }
   }
+  
+  // 在左上角添加一些调试信息
+  fill(0);
+  textSize(16);
+  text(`当前音量: ${vol.toFixed(3)}`, 20, 20);
+  if (isBlowing) {
+    fill(255, 0, 0);
+    text(`正在吹气... 已持续: ${floor(now - blowStartTime)} ms`, 20, 40);
+  }
 }
 
-function chooseDogType(duration) {
-  if (duration < 200) return "short";
-  else if (duration < 400) return "mid";
-  else if (duration < 800) return "middle";
-  else return "long";
-}
 
-// 🐶 Dog 类：从右向左直线跑
+// 🐕 Dog 类
 class Dog {
   constructor(type) {
     this.type = type;
     this.frames = dogFrames[type];
     this.frameIndex = 0;
     this.lastFrameTime = millis();
-    this.frameInterval = 150;
+    this.frameInterval = 150; // 脚动频率
+    
+    // 问题修复 1: 小狗倒着走
+    // 我们让狗从屏幕右边(-100的位置)向左边走
     this.x = width + 100;
-    this.y = height * 0.8; // 固定在一条直线
-    this.speed = -random(1.5, 2.5); // 向左走
+
+    // 问题修复 2: 小狗重叠
+    // 我们让所有狗都出现在同一条水平线上，防止重叠
+    this.y = height - 150; 
+    
+    this.speed = random(1.2, 2.5); // 每只狗速度不一样
   }
 
   update() {
-    this.x += this.speed;
+    // 让狗从右向左移动
+    this.x -= this.speed;
 
+    // 脚动切换
     if (millis() - this.lastFrameTime > this.frameInterval) {
       this.frameIndex = (this.frameIndex + 1) % this.frames.length;
       this.lastFrameTime = millis();
@@ -97,8 +139,17 @@ class Dog {
   display() {
     let img = this.frames[this.frameIndex];
     if (img) {
-      let scaleFactor = min(1, width / 1920);
-      image(img, this.x, this.y, img.width * scaleFactor, img.height * scaleFactor);
+      // 适配不同屏幕尺寸
+      let scaleFactor = min(1, height / 1080);
+      
+      // 问题修复 1: 小狗倒着走
+      // 如果你的图片素材是朝右的，那么从右向左移动时看起来就像倒着走。
+      // 我们使用 push/pop 和 scale(-1, 1) 来水平翻转图片，让它看起来是朝左走的。
+      push();
+      translate(this.x, this.y);
+      scale(-1, 1); // 水平翻转画布
+      image(img, 0, 0, img.width * scaleFactor, img.height * scaleFactor);
+      pop(); // 恢复画布状态
     }
   }
 }
