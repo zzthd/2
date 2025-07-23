@@ -7,11 +7,11 @@ let dogFrames = {
   long: []
 };
 
-let dogs = []; // 保存所有出场的狗
-let lastBlowTime = 0;
-let blowCooldown = 800;
+let dogs = [];
+let blowStartTime = null;
+let lastTriggerTime = 0;
+const blowCooldown = 800; // 最小间隔（防止狗太多）
 
-// 预加载狗狗帧图
 function preload() {
   loadDogFrames("short");
   loadDogFrames("mid");
@@ -35,55 +35,59 @@ function setup() {
 
 function draw() {
   background(255);
-
   vol = mic.getLevel();
 
-  // 检测是否可以触发一次吹气动画
-  if (vol > 0.08 && millis() - lastBlowTime > blowCooldown) {
-    lastBlowTime = millis();
-    let dogType = chooseDogType();
-    dogs.push(new Dog(dogType));
+  let now = millis();
+
+  // 检测吹气开始时间
+  if (vol > 0.06) {
+    if (blowStartTime === null) {
+      blowStartTime = now;
+    }
   }
 
-  // 更新并显示所有狗
+  // 检测吹气结束 -> 添加狗狗
+  if (vol < 0.04 && blowStartTime !== null && now - lastTriggerTime > blowCooldown) {
+    let duration = now - blowStartTime;
+    let dogType = chooseDogType(duration);
+    dogs.push(new Dog(dogType));
+    lastTriggerTime = now;
+    blowStartTime = null;
+  }
+
+  // 更新 & 显示所有狗狗
   for (let i = dogs.length - 1; i >= 0; i--) {
     dogs[i].update();
     dogs[i].display();
-
-    // 如果走出画面，就移除
-    if (dogs[i].x > width + 200) {
+    if (dogs[i].x < -200) {
       dogs.splice(i, 1);
     }
   }
 }
 
-// 根据间隔判断狗狗长度类型
-function chooseDogType() {
-  let interval = millis() - lastBlowTime;
-
-  if (interval < 1000) return "short";
-  else if (interval < 2000) return "mid";
-  else if (interval < 3000) return "middle";
+function chooseDogType(duration) {
+  if (duration < 400) return "short";
+  else if (duration < 1000) return "mid";
+  else if (duration < 1800) return "middle";
   else return "long";
 }
 
-// 🐕 Dog 类
+// 🐶 Dog 类：从右向左直线跑
 class Dog {
   constructor(type) {
     this.type = type;
     this.frames = dogFrames[type];
     this.frameIndex = 0;
     this.lastFrameTime = millis();
-    this.frameInterval = 150; // 脚动频率
-    this.x = -100;
-    this.y = height / 2 + random(-100, 100); // 随机一点高度差
-    this.speed = random(1.2, 2.5); // 每只狗速度不一样
+    this.frameInterval = 150;
+    this.x = width + 100;
+    this.y = height * 0.8; // 固定在一条直线
+    this.speed = -random(1.5, 2.5); // 向左走
   }
 
   update() {
     this.x += this.speed;
 
-    // 脚动切换
     if (millis() - this.lastFrameTime > this.frameInterval) {
       this.frameIndex = (this.frameIndex + 1) % this.frames.length;
       this.lastFrameTime = millis();
@@ -93,7 +97,7 @@ class Dog {
   display() {
     let img = this.frames[this.frameIndex];
     if (img) {
-      let scaleFactor = min(1, width / 1920); // 适配大屏幕
+      let scaleFactor = min(1, width / 1920);
       image(img, this.x, this.y, img.width * scaleFactor, img.height * scaleFactor);
     }
   }
