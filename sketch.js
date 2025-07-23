@@ -66,9 +66,9 @@ function draw() {
 }
 
 function chooseDogType(duration) {
-  if (duration < 400) return "short";
-  else if (duration < 1000) return "mid";
-  else if (duration < 1800) return "middle";
+  if (duration < 200) return "short";
+  else if (duration < 400) return "mid";
+  else if (duration < 800) return "middle";
   else return "long";
 }
 
